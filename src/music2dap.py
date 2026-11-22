@@ -1122,6 +1122,9 @@ class Result:
     source_refreshed: bool = False
     cover_refreshed: bool = False
     lyrics_source: str = ""
+    artist: str = ""
+    album: str = ""
+    title: str = ""
 
 
 def process_track(job: Job, dev: Device, yt, workdir: Path) -> Result:
@@ -1449,17 +1452,23 @@ def update_summary(results: list[Result], elapsed: float, interrupted: bool) -> 
                                       ("  — " + r.note if r.note else "", DIM)))
 
     body.append(Text(""))
-    body.append(Text("tracks", style=f"bold {SUB}"))
+    tree = Tree(Text("tracks", style=f"bold {SUB}"))
+    grouped: dict[tuple[str, str], list[Result]] = {}
     for r in results:
-        if r.status == "fail":
-            mark, colour = "✗", RED
-        elif r.no_source or r.no_lyrics:
-            mark, colour = "!", YELLOW
-        else:
-            mark, colour = "✓", GREEN
-        where = r.folder + " — " if r.folder else ""
-        body.append(Text.assemble((f"  {mark} ", colour), (r.label, TEXT)))
-        body.append(Text.assemble(("      " + where, DIM), (r.note, DIM)))
+        grouped.setdefault((r.album or "Singles", r.artist or "Unknown Artist"), []).append(r)
+    for (album, artist), tracks in sorted(grouped.items(), key=lambda x: (x[0][0].casefold(), x[0][1].casefold())):
+        album_node = tree.add(Text(f"{album} ({artist})", style=f"bold {MAUVE}"))
+        for r in tracks:
+            if r.status == "fail":
+                mark, colour = "✗", RED
+            elif r.no_source or r.no_lyrics:
+                mark, colour = "!", YELLOW
+            else:
+                mark, colour = "✓", GREEN
+            title = r.title or r.label
+            song = album_node.add(Text.assemble((f"{mark} ", colour), (title, TEXT)))
+            song.add(Text(r.note, style=DIM))
+    body.append(tree)
 
     colour = RED if failed and not ok else YELLOW if failed or no_lyrics or no_source or interrupted else GREEN
     return Panel(
@@ -2013,7 +2022,10 @@ def update_one(path: Path, yt, job: Job, root: Path | None) -> Result:
     return Result("ok", job.title, folder, ", ".join(notes),
                   no_lyrics=not lyrics, no_source=not source_link,
                   source_added=source_added, source_refreshed=source_refreshed,
-                  cover_refreshed=bool(cover), lyrics_source=lyrics.source if lyrics else "")
+                  cover_refreshed=bool(cover), lyrics_source=lyrics.source if lyrics else "",
+                  artist=artist_label(t.artists) or artist_label(old.artists) or "Unknown Artist",
+                  album=t.album or old.album or "Singles",
+                  title=t.title or old.title)
 
 
 def normalize_music_dir(value: str | None) -> str:
