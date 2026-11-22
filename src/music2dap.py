@@ -172,15 +172,28 @@ def norm(s: str) -> str:
 # the device
 # --------------------------------------------------------------------------- #
 
+def resolve_device_path(root: Path, device: str, music_dir: str) -> Path:
+    """<root>/<device>, unless <root> is already the device (custom --mount-root)."""
+    nested = root / device
+    if nested.is_dir() or not (root / music_dir).is_dir():
+        return nested
+    return root
+
+
 @dataclass
 class Device:
     name: str
     root: Path
     music_dir: str
+    device_path: Path | None = None
+
+    def __post_init__(self):
+        self.root = Path(self.root).expanduser()
+        self.device_path = resolve_device_path(self.root, self.name, self.music_dir)
 
     @property
     def path(self) -> Path:
-        return self.root / self.name
+        return self.device_path or (self.root / self.name)
 
     @property
     def library(self) -> Path:
@@ -2073,14 +2086,15 @@ def resolve_scan_roots(paths: list[str], music_dir: str) -> list[Path]:
 def default_scan_path(mount_root: str, device: str, music_dir: str) -> str:
     """Where --doctor / --update-metadata look when no path was given."""
     root = Path(mount_root).expanduser()
-    candidates = [root / device / music_dir, root / music_dir, root / device, root]
+    dev = resolve_device_path(root, device, music_dir)
+    candidates = [dev / music_dir, root / music_dir, root / device, root]
     for c in candidates:
         if not c.is_dir():
             continue
         resolved = resolve_scan_roots([str(c)], music_dir)
         if resolved and all(x.is_dir() for x in resolved):
             return str(resolved[0])
-    return str(root / device / music_dir)
+    return str(dev / music_dir)
 
 
 def scan_audio(paths: list[str], music_dir: str) -> tuple[list[Path], Path | None]:
