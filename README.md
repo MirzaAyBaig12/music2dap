@@ -17,7 +17,7 @@ Apply `overlays.default` (or import `homeManagerModules.music2dap` /
 ```nix
 programs.music2dap = {
   enable = true;
-  musicDevice = "HiBy R1 SD";
+  musicDeviceMount = "HiBy R1 SD";
   preferredFormat = "FLAC";
 };
 ```

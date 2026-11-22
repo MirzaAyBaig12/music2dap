@@ -5,9 +5,9 @@
   ffmpeg,
   nodejs,
   makeWrapper,
-  # Name of the mounted device, i.e. the folder /run/media/$USER/<musicDevice>.
-  # programs.music2dap sets this from its `musicDevice` option.
-  musicDevice ? "HiBy R1 SD",
+  # Name of the mounted device, i.e. the folder /run/media/$USER/<musicDeviceMount>.
+  # programs.music2dap sets this from its `musicDeviceMount` option.
+  musicDeviceMount ? "HiBy R1 SD",
   mountRoot ? "/run/media/$USER",
   musicDir ? "Music",
   # Output format: FLAC, MP3 or OPUS.
@@ -49,7 +49,7 @@ stdenvNoCC.mkDerivation {
     makeWrapper ${pythonEnv}/bin/python3 $out/bin/music2dap \
       --add-flags $out/share/music2dap/music2dap.py \
       --prefix PATH : ${lib.makeBinPath [ ffmpeg nodejs ]} \
-      --set-default MUSIC2DAP_DEVICE ${lib.escapeShellArg musicDevice} \
+      --set-default MUSIC2DAP_DEVICE ${lib.escapeShellArg musicDeviceMount} \
       --set-default MUSIC2DAP_MUSIC_DIR ${lib.escapeShellArg musicDir} \
       --set-default MUSIC2DAP_MOUNT_ROOT ${lib.escapeShellArg mountRoot} \
       --set-default MUSIC2DAP_FORMAT ${lib.escapeShellArg preferredFormat}

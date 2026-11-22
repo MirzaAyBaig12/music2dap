@@ -2,12 +2,12 @@
 #
 #   programs.music2dap = {
 #     enable = true;
-#     musicDevice = "HiBy R1 SD";
+#     musicDeviceMount = "HiBy R1 SD";
 #     preferredFormat = "FLAC";
 #   };
 #
-# The device is looked up at <mountRoot>/<musicDevice> and files are written to
-# <mountRoot>/<musicDevice>/<musicDir>/<Artist>/<Album>/. One-track albums and
+# The device is looked up at <mountRoot>/<musicDeviceMount> and files are written to
+# <mountRoot>/<musicDeviceMount>/<musicDir>/<Artist>/<Album>/. One-track albums and
 # tracks without an album go into <Artist>/Singles/.
 { isHomeManager }:
 { config, lib, pkgs, ... }:
@@ -19,7 +19,7 @@ let
   upstream = pkgs.music2dap or (pkgs.callPackage ../packages/music2dap.nix { });
 
   built = upstream.override {
-    musicDevice = cfg.musicDevice;
+    musicDeviceMount = cfg.musicDeviceMount;
     mountRoot = cfg.mountRoot;
     musicDir = cfg.musicDir;
     preferredFormat = cfg.preferredFormat;
@@ -29,7 +29,7 @@ in
   options.programs.music2dap = {
     enable = lib.mkEnableOption "Music2DAP (Spotify links to tagged audio on your DAP)";
 
-    musicDevice = lib.mkOption {
+    musicDeviceMount = lib.mkOption {
       type = lib.types.str;
       default = "HiBy R1 SD";
       example = "HiBy R1 SD";
