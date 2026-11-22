@@ -147,6 +147,15 @@ def safe_name(name: str, fallback: str = "Unknown", maxlen: int = 110) -> str:
 _BRACKETS = re.compile(r"[\(\[].*?[\)\]]")
 
 
+def artist_label(artists: list[str]) -> str:
+    """Maher Zain + Mesut Kurtis -> 'Maher Zain feat. Mesut Kurtis'."""
+    if not artists:
+        return ""
+    if len(artists) == 1:
+        return artists[0]
+    return f"{artists[0]} feat. " + " & ".join(artists[1:])
+
+
 def norm(s: str) -> str:
     """Normalise a title/artist for fuzzy comparison (keeps non-Latin scripts)."""
     base = unicodedata.normalize("NFKC", s or "").casefold()
@@ -877,7 +886,7 @@ def tag_flac(path: Path, t: Track, cover: bytes | None, lyrics: Lyrics | None = 
     f = FLAC(path)
     f.clear_pictures()
     f["TITLE"] = t.title
-    f["ARTIST"] = ", ".join(t.artists)
+    f["ARTIST"] = artist_label(t.artists)
     f["ALBUMARTIST"] = t.album_artist or t.artists[0]
     if t.album:
         f["ALBUM"] = t.album
@@ -958,7 +967,7 @@ def tag_generic(path: Path, t: Track, cover: bytes | None, lyrics: Lyrics | None
     source = source_link or (f"https://open.spotify.com/track/{t.id}" if t.id else "")
     values = [
         ("title", t.title),
-        ("artist", ", ".join(t.artists)),
+        ("artist", artist_label(t.artists)),
         ("albumartist", t.album_artist or (t.artists[0] if t.artists else "")),
         ("album", t.album),
         ("tracknumber", str(t.track_no) if t.track_no else ""),
@@ -1009,7 +1018,7 @@ def tag_id3(path: Path, t: Track, cover: bytes | None, lyrics: Lyrics | None,
             tags.setall(name, [TXXX(encoding=3, desc=name, text=[str(text)])])
 
     for name, text in (
-        ("TIT2", t.title), ("TPE1", ", ".join(t.artists)),
+        ("TIT2", t.title), ("TPE1", artist_label(t.artists)),
         ("TPE2", t.album_artist or (t.artists[0] if t.artists else "")),
         ("TALB", t.album), ("TDRC", t.date),
         ("TRCK", f"{t.track_no}/{t.track_total}" if t.track_no and t.track_total else str(t.track_no or "")),
@@ -1483,6 +1492,143 @@ def run_queue(dev: Device, ids: list[str]) -> None:
 
 _source_search_cache: dict[str, str] = {}
 
+# Spotify's anonymous web-player search (same endpoint the web UI uses).
+# Hash rotates rarely; if it ever does, the legacy crawl below still runs.
+_PATHFINDER_HASH = "eff59fa0a3d026b88b56fddbcf4bdfa16a186b8175a5c1a358c072e053c2e5b0"
+_web_token = ("", 0.0)
+
+
+def spotify_web_token() -> str:
+    """Anonymous bearer from a public embed page; no API key or login."""
+    global _web_token
+    token, expiry = _web_token
+    if token and time.time() < expiry - 60:
+        return token
+    sid = next(iter(_seed_ids), "4yuYK900ivfBnK4RwKk5Mo")
+    page = get(f"https://open.spotify.com/embed/track/{sid}").text
+    m = re.search(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', page, re.S)
+    if not m:
+        raise SpotifyError("couldn't get Spotify web token")
+    session = json.loads(m.group(1))["props"]["pageProps"]["state"]["settings"]["session"]
+    token = session["accessToken"]
+    expiry = session.get("accessTokenExpirationTimestampMs", 0) / 1000
+    _web_token = (token, expiry)
+    return token
+
+
+def spotify_candidates(title: str, artists: list[str], album: str = "") -> list[tuple[str, str, list[str], str]]:
+    """Search Spotify's public catalogue: [(id, title, artists, album), ...]."""
+    token = spotify_web_token()
+    queries = [" ".join(x for x in (title, " ".join(artists)) if x).strip()]
+    if album and norm(album) not in norm(title):
+        queries.append(f"{title} {album}".strip())
+    if artists:
+        queries.append(title)
+
+    out: list[tuple[str, str, list[str], str]] = []
+    seen: set[str] = set()
+    for query in dict.fromkeys(queries):
+        variables = {
+            "searchTerm": query,
+            "offset": 0,
+            "limit": 10,
+            "numberOfTopResults": 5,
+            "includeAudiobooks": False,
+            "includePreReleases": True,
+            "includeAlbumPreReleases": False,
+        }
+        params = {
+            "operationName": "searchDesktop",
+            "variables": json.dumps(variables, separators=(",", ":")),
+            "extensions": json.dumps(
+                {"persistedQuery": {"version": 1, "sha256Hash": _PATHFINDER_HASH}},
+                separators=(",", ":"),
+            ),
+        }
+        url = "https://api-partner.spotify.com/pathfinder/v1/query?" + urlencode(params)
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/json",
+            "app-platform": "WebPlayer",
+            "User-Agent": "Mozilla/5.0",
+        }
+        r = http.get(url, headers=headers, timeout=25)
+        if not r.ok:
+            continue
+        data = r.json().get("data", {}).get("searchV2", {})
+        for item in (data.get("tracksV2") or {}).get("items") or []:
+            hit = (item.get("item") or {}).get("data") or {}
+            m = re.fullmatch(r"spotify:track:([A-Za-z0-9]{22})", hit.get("uri", ""))
+            if not m or m.group(1) in seen:
+                continue
+            seen.add(m.group(1))
+            names = [
+                a.get("profile", {}).get("name", "")
+                for a in (hit.get("artists") or {}).get("items") or []
+            ]
+            alb = (hit.get("albumOfTrack") or {}).get("name", "")
+            out.append((m.group(1), hit.get("name", ""), [n for n in names if n], alb))
+        if out:
+            break
+    return out
+
+
+def _candidate_score(title: str, artists: list[str], album: str,
+                     cand_title: str, cand_artists: list[str], cand_album: str) -> float:
+    score = max(similar(title, cand_title), similar(_bare_title(title), _bare_title(cand_title)))
+    if artists:
+        score += 3 if artist_ok(artists, cand_artists) else -3
+    if album and similar(album, cand_album) >= 2:
+        score += 1
+    return score
+
+
+def ask_spotify_candidate(title: str, choices: list[tuple[str, str, list[str], str]]) -> str:
+    """No usable artist tag: let the user pick the right one."""
+    lines = [Text(f"Several Spotify matches for “{title}” — pick one:", style=SUB)]
+    for i, (_, ct, ca, cal) in enumerate(choices, 1):
+        lines.append(Text.assemble(
+            (f"  {i}. ", MAUVE), (ct, TEXT),
+            (" — ", DIM), (artist_label(ca) or "?", TEXT),
+            (f"  [{cal}]" if cal else "", DIM),
+        ))
+    console.print(Panel(Group(*lines), title=Text(" spotify match ", style=f"bold {BASE} on {MAUVE}"),
+                        title_align="left", border_style=MAUVE, box=box.ROUNDED, padding=(1, 2)))
+    if not console.is_terminal or not sys.stdin.isatty():
+        return choices[0][0]  # never hang in a pipe / CI
+    while True:
+        answer = console.input(Text("  number (blank = first, q = skip) ", style=SUB))
+        answer = answer.strip()
+        if answer.lower() in ("q", "quit", "skip"):
+            return ""
+        if not answer:
+            return choices[0][0]
+        if answer.isdigit() and 1 <= int(answer) <= len(choices):
+            return choices[int(answer) - 1][0]
+
+
+def spotify_catalog_search(title: str, artists: list[str], album: str = "") -> str:
+    candidates = spotify_candidates(title, artists, album)
+    if not candidates:
+        return ""
+    scored = [
+        (_candidate_score(title, artists, album, ct, ca, cal), sid, ct, ca, cal)
+        for sid, ct, ca, cal in candidates
+    ]
+    if artists:
+        # A real artist tag is enough to decide; prefer album, then best score.
+        usable = [x for x in scored if x[0] >= 4.4]
+        if not usable:
+            return ""
+        usable.sort(key=lambda x: x[0], reverse=True)
+        return usable[0][1]
+    usable = [x for x in scored if x[0] >= 2.8]
+    if not usable:
+        return ""
+    if len(usable) == 1:
+        return usable[0][1]
+    return ask_spotify_candidate(title, [(x[1], x[2], x[3], x[4]) for x in usable[:8]])
+
 
 def source_id(raw: str) -> str:
     parsed = parse_spotify(raw) if raw else None
@@ -1570,8 +1716,8 @@ def build_artist_index() -> None:
                         bucket.setdefault(_bare_title(item["title"]), m.group(1))
 
 
-def spotify_search_id(title: str, artists: list[str], album: str = "") -> str:
-    """Find a file's Spotify id from its tags, then fall back to web search."""
+def spotify_search_id_fallback(title: str, artists: list[str], album: str = "") -> str:
+    """Old artist-crawl + web-search lookup, kept as a fallback."""
     key = norm(title) + "|" + ",".join(norm(a) for a in artists)
     if key in _source_search_cache:
         return _source_search_cache[key]
@@ -1631,6 +1777,22 @@ def spotify_search_id(title: str, artists: list[str], album: str = "") -> str:
     return found
 
 
+def spotify_search_id(title: str, artists: list[str], album: str = "") -> str:
+    """Primary: anonymous Spotify search. Fallback: the old artist crawl."""
+    key = norm(title) + "|" + ",".join(norm(a) for a in artists)
+    if key in _source_search_cache:
+        return _source_search_cache[key]
+    found = ""
+    try:
+        found = spotify_catalog_search(title, artists, album)
+    except Exception:
+        found = ""
+    if not found:
+        found = spotify_search_id_fallback(title, artists, album)
+    _source_search_cache[key] = found
+    return found
+
+
 ID3_KEYS = {
     "TITLE": "TIT2", "ARTIST": "TPE1", "ALBUM": "TALB", "ALBUMARTIST": "TPE2",
     "DATE": "TDRC", "TRACKNUMBER": "TRCK", "DISCNUMBER": "TPOS",
@@ -1669,7 +1831,8 @@ def tag_value(f, key: str) -> str:
 def track_from_tags(f, path: Path) -> Track:
     t = Track("")
     t.title = tag_value(f, "TITLE") or path.stem
-    t.artists = [a.strip() for a in re.split(r"[,;]", tag_value(f, "ARTIST")) if a.strip()]
+    raw_artists = tag_value(f, "ARTIST")
+    t.artists = [a.strip() for a in re.split(r"[,;]|\s+(?:feat\.?|ft\.?)\s+", raw_artists, flags=re.I) if a.strip()]
     t.album = tag_value(f, "ALBUM")
     t.album_artist = tag_value(f, "ALBUMARTIST")
     t.date = tag_value(f, "DATE")
@@ -1699,7 +1862,7 @@ def update_one(path: Path, yt, job: Job, root: Path | None) -> Result:
         via = "COMMENT" if sid else ""
     if not sid:
         try:
-            sid = spotify_search_id(old.title, old.artists)
+            sid = spotify_search_id(old.title, old.artists, old.album)
             via = "Spotify search" if sid else ""
         except Exception:
             sid = ""
@@ -1756,7 +1919,7 @@ def update_one(path: Path, yt, job: Job, root: Path | None) -> Result:
         notes.append("no lyrics found (LRCLIB, Genius, YT Music)")
     if cover:
         notes.append("cover refreshed")
-    folder = str(path.parent.relative_to(root)) if root and path.is_relative_to(root) else path.parent.name
+    folder = str(path.parent.relative_to(root)) if root and path.parent.is_relative_to(root) else path.parent.name
     job.set("tag", "done", f"{len(notes)} changes written")
     return Result("ok", job.title, folder, ", ".join(notes),
                   no_lyrics=not lyrics, no_source=not source_link)
