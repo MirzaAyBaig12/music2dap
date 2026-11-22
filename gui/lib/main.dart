@@ -27,25 +27,38 @@ class Music2DapApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(seedColor: seed, brightness: Brightness.dark),
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: seed,
+          brightness: Brightness.dark,
+        ),
         scaffoldBackgroundColor: const Color(0xFF111017),
         cardTheme: CardThemeData(
           color: const Color(0xFF1B1924),
           elevation: 0,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
         ),
         inputDecorationTheme: InputDecorationTheme(
           filled: true,
           fillColor: const Color(0xFF211E2C),
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
-          contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(10),
+            borderSide: BorderSide.none,
+          ),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 14,
+            vertical: 12,
+          ),
         ),
         filledButtonTheme: FilledButtonThemeData(
           style: FilledButton.styleFrom(
             backgroundColor: seed,
             foregroundColor: const Color(0xFF120E19),
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
           ),
         ),
       ),
@@ -68,6 +81,17 @@ class _AppShellState extends State<AppShell> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      appBar: AppBar(
+        title: const Text('Music2DAP'),
+        backgroundColor: const Color(0xFF17151F),
+        actions: [
+          IconButton(
+            tooltip: 'Settings',
+            icon: const Icon(Icons.settings),
+            onPressed: () => setState(() => _index = 2),
+          ),
+        ],
+      ),
       body: Row(
         children: [
           NavigationRail(
@@ -86,20 +110,36 @@ class _AppShellState extends State<AppShell> {
                       color: const Color(0xFFB07BD8).withValues(alpha: .18),
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    child: const Icon(Icons.graphic_eq, color: Color(0xFFD6B8F0)),
+                    child: const Icon(
+                      Icons.graphic_eq,
+                      color: Color(0xFFD6B8F0),
+                    ),
                   ),
                   const SizedBox(width: 10),
                   const Text(
                     'Music2DAP',
-                    style: TextStyle(fontWeight: FontWeight.w800, fontSize: 17, letterSpacing: .3),
+                    style: TextStyle(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 17,
+                      letterSpacing: .3,
+                    ),
                   ),
                 ],
               ),
             ),
             destinations: const [
-              NavigationRailDestination(icon: Icon(Icons.download_for_offline_outlined), label: Text('Download')),
-              NavigationRailDestination(icon: Icon(Icons.health_and_safety_outlined), label: Text('Doctor')),
-              NavigationRailDestination(icon: Icon(Icons.tune), label: Text('Settings')),
+              NavigationRailDestination(
+                icon: Icon(Icons.download_for_offline_outlined),
+                label: Text('Download'),
+              ),
+              NavigationRailDestination(
+                icon: Icon(Icons.health_and_safety_outlined),
+                label: Text('Doctor'),
+              ),
+              NavigationRailDestination(
+                icon: Icon(Icons.tune),
+                label: Text('Settings'),
+              ),
             ],
           ),
           const VerticalDivider(width: 1, thickness: 1),
@@ -141,12 +181,17 @@ class _DownloadPageState extends State<DownloadPage> {
 
   void log(String s) {
     final now = DateTime.now();
-    final stamp = '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}';
+    final stamp =
+        '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}';
     _log.value = [..._log.value, '$stamp  $s'];
   }
 
   Future<void> preview() async {
-    final lines = _links.text.split('\n').map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
+    final lines = _links.text
+        .split('\n')
+        .map((s) => s.trim())
+        .where((s) => s.isNotEmpty)
+        .toList();
     if (lines.isEmpty) {
       _summary.value = 'Paste at least one Spotify link.';
       return;
@@ -200,7 +245,8 @@ class _DownloadPageState extends State<DownloadPage> {
         log('✗ ${r.message}');
       }
     }
-    _summary.value = 'Done: $ok downloaded, $failed failed, $withLyrics with lyrics.\n'
+    _summary.value =
+        'Done: $ok downloaded, $failed failed, $withLyrics with lyrics.\n'
         '${written.join('\n')}\n\nRescan your DAP library if the songs do not appear.';
     setState(() => _busy = false);
   }
@@ -213,7 +259,11 @@ class _DownloadPageState extends State<DownloadPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Download', style: Theme.of(context).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.w800)),
+          Text(
+            'Download',
+            style: Theme.of(context).textTheme.headlineMedium
+                ?.copyWith(fontWeight: FontWeight.w800),
+          ),
           const SizedBox(height: 4),
           Text(
             'Spotify links → tagged ${widget.settings.format} in ${widget.settings.libraryPath}',
@@ -249,7 +299,12 @@ class _DownloadPageState extends State<DownloadPage> {
                         label: const Text('Download all'),
                       ),
                       const Spacer(),
-                      Text('format: ${widget.settings.format}', style: TextStyle(color: cs.onSurface.withValues(alpha: .55))),
+                      Text(
+                        'format: ${widget.settings.format}',
+                        style: TextStyle(
+                          color: cs.onSurface.withValues(alpha: .55),
+                        ),
+                      ),
                     ],
                   ),
                 ],
@@ -269,22 +324,38 @@ class _DownloadPageState extends State<DownloadPage> {
                     valueListenable: _tracks,
                     builder: (_, tracks, _) => Card(
                       child: tracks.isEmpty
-                          ? const Center(child: Text('No tracks previewed yet.'))
+                          ? const Center(
+                              child: Text('No tracks previewed yet.'),
+                            )
                           : ListView.separated(
                               padding: const EdgeInsets.all(8),
                               itemCount: tracks.length,
-                              separatorBuilder: (_, _) => const Divider(height: 1),
+                              separatorBuilder: (_, _) =>
+                                  const Divider(height: 1),
                               itemBuilder: (_, i) {
                                 final t = tracks[i];
                                 return ListTile(
                                   leading: t.coverUrl.isEmpty
                                       ? const Icon(Icons.music_note)
-                                      : Image.network(t.coverUrl, width: 46, height: 46, fit: BoxFit.cover,
-                                          errorBuilder: (_, _, _) => const Icon(Icons.music_note)),
-                                  title: Text(t.title, overflow: TextOverflow.ellipsis),
-                                  subtitle: Text('${t.artists.join(', ')}${t.album.isEmpty ? '' : ' · ${t.album}'}',
-                                      overflow: TextOverflow.ellipsis),
-                                  trailing: t.trackNo > 0 ? Text('${t.trackNo}'.padLeft(2, '0')) : null,
+                                      : Image.network(
+                                          t.coverUrl,
+                                          width: 46,
+                                          height: 46,
+                                          fit: BoxFit.cover,
+                                          errorBuilder: (_, _, _) =>
+                                              const Icon(Icons.music_note),
+                                        ),
+                                  title: Text(
+                                    t.title,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  subtitle: Text(
+                                    '${t.artists.join(', ')}${t.album.isEmpty ? '' : ' · ${t.album}'}',
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  trailing: t.trackNo > 0
+                                      ? Text('${t.trackNo}'.padLeft(2, '0'))
+                                      : null,
                                 );
                               },
                             ),
@@ -299,17 +370,37 @@ class _DownloadPageState extends State<DownloadPage> {
                       children: [
                         Padding(
                           padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
-                          child: Text('Activity', style: TextStyle(color: cs.primary, fontWeight: FontWeight.bold)),
+                          child: Text(
+                            'Activity',
+                            style: TextStyle(
+                              color: cs.primary,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
                         ),
                         Expanded(
                           child: ValueListenableBuilder<List<String>>(
                             valueListenable: _log,
                             builder: (_, lines, _) => ListView(
-                              padding: const EdgeInsets.symmetric(horizontal: 16),
-                              children: lines.map((l) => Padding(
-                                padding: const EdgeInsets.symmetric(vertical: 2),
-                                child: Text(l, style: const TextStyle(fontFamily: 'monospace', fontSize: 11.5)),
-                              )).toList(),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                              ),
+                              children: lines
+                                  .map(
+                                    (l) => Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        vertical: 2,
+                                      ),
+                                      child: Text(
+                                        l,
+                                        style: const TextStyle(
+                                          fontFamily: 'monospace',
+                                          fontSize: 11.5,
+                                        ),
+                                      ),
+                                    ),
+                                  )
+                                  .toList(),
                             ),
                           ),
                         ),
@@ -324,7 +415,10 @@ class _DownloadPageState extends State<DownloadPage> {
                                     color: cs.primary.withValues(alpha: .1),
                                     borderRadius: BorderRadius.circular(10),
                                   ),
-                                  child: Text(text, style: const TextStyle(fontSize: 12.5)),
+                                  child: Text(
+                                    text,
+                                    style: const TextStyle(fontSize: 12.5),
+                                  ),
                                 ),
                         ),
                       ],
@@ -386,19 +480,36 @@ class _DoctorPageState extends State<DoctorPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Doctor', style: Theme.of(context).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.w800)),
+          Text(
+            'Doctor',
+            style: Theme.of(context).textTheme.headlineMedium
+                ?.copyWith(fontWeight: FontWeight.w800),
+          ),
           const SizedBox(height: 4),
-          Text('Checks every track for a source link, cover, album and artist — grouped by artist and album.',
-              style: TextStyle(color: cs.onSurface.withValues(alpha: .6))),
+          Text(
+            'Checks every track for a source link, cover, album and artist — grouped by artist and album.',
+            style: TextStyle(color: cs.onSurface.withValues(alpha: .6)),
+          ),
           const SizedBox(height: 20),
           Card(
             child: Padding(
               padding: const EdgeInsets.all(16),
               child: Row(
                 children: [
-                  Expanded(child: TextField(controller: _root, decoration: const InputDecoration(labelText: 'Music directory'))),
+                  Expanded(
+                    child: TextField(
+                      controller: _root,
+                      decoration: const InputDecoration(
+                        labelText: 'Music directory',
+                      ),
+                    ),
+                  ),
                   const SizedBox(width: 12),
-                  FilledButton.icon(onPressed: _busy ? null : scan, icon: const Icon(Icons.fact_check), label: const Text('Scan')),
+                  FilledButton.icon(
+                    onPressed: _busy ? null : scan,
+                    icon: const Icon(Icons.fact_check),
+                    label: const Text('Scan'),
+                  ),
                 ],
               ),
             ),
@@ -410,11 +521,16 @@ class _DoctorPageState extends State<DoctorPage> {
               valueListenable: _rows,
               builder: (_, rows, _) {
                 if (rows.isEmpty) {
-                  return const Card(child: Center(child: Text('No tracks scanned yet.')));
+                  return const Card(
+                    child: Center(child: Text('No tracks scanned yet.')),
+                  );
                 }
                 final byArtist = <String, Map<String, List<DoctorRow>>>{};
                 for (final r in rows) {
-                  byArtist.putIfAbsent(r.artist, () => {}).putIfAbsent(r.album, () => []).add(r);
+                  byArtist
+                      .putIfAbsent(r.artist, () => {})
+                      .putIfAbsent(r.album, () => [])
+                      .add(r);
                 }
                 final ok = rows.where((r) => r.ok).length;
                 return Column(
@@ -426,8 +542,12 @@ class _DoctorPageState extends State<DoctorPage> {
                           children: [
                             Icon(Icons.summarize, color: cs.primary),
                             const SizedBox(width: 10),
-                            Text('${rows.length} scanned · $ok complete · ${rows.length - ok} with missing fields',
-                                style: const TextStyle(fontWeight: FontWeight.w600)),
+                            Text(
+                              '${rows.length} scanned · $ok complete · ${rows.length - ok} with missing fields',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
                           ],
                         ),
                       ),
@@ -437,18 +557,43 @@ class _DoctorPageState extends State<DoctorPage> {
                         children: byArtist.entries.map((ae) {
                           return ExpansionTile(
                             leading: const Icon(Icons.person_outline),
-                            title: Text(ae.key, style: const TextStyle(fontWeight: FontWeight.bold)),
-                            subtitle: Text('${ae.value.values.fold<int>(0, (a, b) => a + b.length)} song(s)'),
+                            title: Text(
+                              ae.key,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            subtitle: Text(
+                              '${ae.value.values.fold<int>(0, (a, b) => a + b.length)} song(s)',
+                            ),
                             children: ae.value.entries.map((al) {
                               return ExpansionTile(
                                 title: Text(al.key),
                                 initiallyExpanded: true,
-                                children: al.value.map((r) => ListTile(
-                                      leading: Icon(r.ok ? Icons.check_circle : Icons.error_outline,
-                                          color: r.ok ? Colors.greenAccent : Colors.orangeAccent),
-                                      title: Text(r.path.split(Platform.pathSeparator).last),
-                                      subtitle: Text(r.ok ? 'all good' : 'missing: ${r.missing.join(', ')}'),
-                                    )).toList(),
+                                children: al.value
+                                    .map(
+                                      (r) => ListTile(
+                                        leading: Icon(
+                                          r.ok
+                                              ? Icons.check_circle
+                                              : Icons.error_outline,
+                                          color: r.ok
+                                              ? Colors.greenAccent
+                                              : Colors.orangeAccent,
+                                        ),
+                                        title: Text(
+                                          r.path
+                                              .split(Platform.pathSeparator)
+                                              .last,
+                                        ),
+                                        subtitle: Text(
+                                          r.ok
+                                              ? 'all good'
+                                              : 'missing: ${r.missing.join(', ')}',
+                                        ),
+                                      ),
+                                    )
+                                    .toList(),
                               );
                             }).toList(),
                           );
@@ -479,14 +624,22 @@ class SettingsPage extends StatefulWidget {
 }
 
 class _SettingsPageState extends State<SettingsPage> {
-  late final TextEditingController _mount, _device, _musicDir, _ytdlp, _ffmpeg;
+  late final TextEditingController _player,
+      _mount,
+      _device,
+      _musicDir,
+      _ytdlp,
+      _ffmpeg;
   late String _format;
   String _saved = '';
+  bool _checking = false;
+  List<ToolCheck> _checks = [];
 
   @override
   void initState() {
     super.initState();
     final s = widget.settings;
+    _player = TextEditingController(text: s.playerPath);
     _mount = TextEditingController(text: s.mountRoot);
     _device = TextEditingController(text: s.deviceMount);
     _musicDir = TextEditingController(text: s.musicDir);
@@ -498,6 +651,7 @@ class _SettingsPageState extends State<SettingsPage> {
   Future<void> save() async {
     final s = widget.settings;
     s
+      ..playerPath = _player.text.trim()
       ..mountRoot = _mount.text.trim()
       ..deviceMount = _device.text.trim()
       ..musicDir = _musicDir.text.trim()
@@ -508,20 +662,84 @@ class _SettingsPageState extends State<SettingsPage> {
     setState(() => _saved = 'Saved. Target: ${s.libraryPath}');
   }
 
-  Widget field(String label, TextEditingController c, {String? hint}) => Padding(
+  void useBundled() {
+    final yt = BundledTools.ytdlp;
+    final ff = BundledTools.ffmpeg;
+    if (yt.isEmpty && ff.isEmpty) {
+      setState(
+        () => _saved = 'No bundled tools found — using PATH (yt-dlp / ffmpeg).',
+      );
+      return;
+    }
+    setState(() {
+      if (yt.isNotEmpty) _ytdlp.text = yt;
+      if (ff.isNotEmpty) _ffmpeg.text = ff;
+      _saved = 'Bundled tools selected. Save to keep them.';
+    });
+  }
+
+  Future<void> checkTools() async {
+    setState(() => _checking = true);
+    final ff = _ffmpeg.text.trim();
+    final probeDir = ff.contains(RegExp(r'[\\/]'))
+        ? ff.substring(0, ff.lastIndexOf(RegExp(r'[\\/]')) + 1)
+        : '';
+    final ext = Platform.isWindows ? '.exe' : '';
+    final probe = probeDir.isNotEmpty
+        ? '$probeDir${ff.split(RegExp(r'[\\/]')).last.replaceAll(RegExp(r'\.exe$', caseSensitive: false), '').replaceAll('ffmpeg', 'ffprobe')}$ext'
+        : 'ffprobe';
+    final results = await Future.wait([
+      ToolCheck.run('yt-dlp', _ytdlp.text.trim(), ['--version']),
+      ToolCheck.run('ffmpeg', ff, ['-version']),
+      ToolCheck.run('ffprobe', probe, ['-version']),
+    ]);
+    if (!mounted) return;
+    setState(() {
+      _checks = results;
+      _checking = false;
+    });
+  }
+
+  Widget field(String label, TextEditingController c, {String? hint}) =>
+      Padding(
         padding: const EdgeInsets.only(bottom: 12),
-        child: TextField(controller: c, decoration: InputDecoration(labelText: label, hintText: hint)),
+        child: TextField(
+          controller: c,
+          decoration: InputDecoration(labelText: label, hintText: hint),
+        ),
       );
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final preview = _player.text.trim().isNotEmpty
+        ? _player.text.trim()
+        : _joinPreview(
+            _mount.text.trim().replaceAll(
+              r'$USER',
+              Platform.environment['USER'] ??
+                  Platform.environment['USERNAME'] ??
+                  '',
+            ),
+            _device.text.trim(),
+            _musicDir.text.trim(),
+          );
     return Padding(
       padding: const EdgeInsets.all(28),
       child: SingleChildScrollView(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Settings', style: Theme.of(context).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.w800)),
+            Text(
+              'Settings',
+              style: Theme.of(context).textTheme.headlineMedium
+                  ?.copyWith(fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Settings are saved on this computer and used by both Download and Doctor.',
+              style: TextStyle(color: cs.onSurface.withValues(alpha: .6)),
+            ),
             const SizedBox(height: 20),
             Card(
               child: Padding(
@@ -529,31 +747,161 @@ class _SettingsPageState extends State<SettingsPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    field('Mount root (\$USER is expanded)', _mount, hint: '/run/media/\$USER'),
+                    Text(
+                      'Player location',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Set the full path to the music folder on your player. Leave blank to build it from the fields below.',
+                      style: TextStyle(
+                        color: cs.onSurface.withValues(alpha: .6),
+                        fontSize: 12.5,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    field(
+                      'Player / music folder (full path)',
+                      _player,
+                      hint: Platform.isWindows
+                          ? r'E:\Music'
+                          : '/run/media/you/HiBy R1 SD/Music',
+                    ),
+                    field(
+                      'Mount root (\$USER is expanded)',
+                      _mount,
+                      hint: Platform.isWindows ? r'D:\' : r'/run/media/$USER',
+                    ),
                     field('Device mount name', _device, hint: 'HiBy R1 SD'),
                     field('Music folder on device', _musicDir, hint: 'Music'),
-                    const SizedBox(height: 4),
-                    Text('Output format', style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withValues(alpha: .7))),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: cs.primary.withValues(alpha: .08),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        'Target: $preview',
+                        style: TextStyle(
+                          fontFamily: 'monospace',
+                          color: cs.primary,
+                          fontSize: 12.5,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+                    Text(
+                      'Output format',
+                      style: TextStyle(
+                        color: cs.onSurface.withValues(alpha: .7),
+                      ),
+                    ),
                     const SizedBox(height: 6),
                     DropdownButton<String>(
                       value: _format,
-                      items: AppSettings.formats.map((f) => DropdownMenuItem(value: f, child: Text(f))).toList(),
+                      items: AppSettings.formats
+                          .map(
+                            (f) => DropdownMenuItem(value: f, child: Text(f)),
+                          )
+                          .toList(),
                       onChanged: (v) => setState(() => _format = v ?? 'FLAC'),
                     ),
-                    const SizedBox(height: 18),
-                    const Divider(),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          'Tools',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                        const Spacer(),
+                        TextButton.icon(
+                          onPressed: useBundled,
+                          icon: const Icon(Icons.folder_zip_outlined),
+                          label: const Text('Use bundled'),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'The Windows installer bundles yt-dlp, ffmpeg and ffprobe. You can also point these at your own executables.',
+                      style: TextStyle(
+                        color: cs.onSurface.withValues(alpha: .6),
+                        fontSize: 12.5,
+                      ),
+                    ),
                     const SizedBox(height: 12),
-                    Text('Tools', style: Theme.of(context).textTheme.titleMedium),
-                    const SizedBox(height: 10),
                     field('yt-dlp executable', _ytdlp, hint: 'yt-dlp'),
-                    field('ffmpeg executable (ffprobe is derived from it)', _ffmpeg, hint: 'ffmpeg'),
-                    const SizedBox(height: 8),
-                    FilledButton.icon(onPressed: save, icon: const Icon(Icons.save), label: const Text('Save settings')),
+                    field(
+                      'ffmpeg executable (ffprobe is derived from it)',
+                      _ffmpeg,
+                      hint: 'ffmpeg',
+                    ),
+                    Wrap(
+                      spacing: 12,
+                      children: [
+                        FilledButton.icon(
+                          onPressed: save,
+                          icon: const Icon(Icons.save),
+                          label: const Text('Save settings'),
+                        ),
+                        OutlinedButton.icon(
+                          onPressed: _checking ? null : checkTools,
+                          icon: const Icon(Icons.fact_check_outlined),
+                          label: Text(_checking ? 'Checking…' : 'Check tools'),
+                        ),
+                      ],
+                    ),
                     if (_saved.isNotEmpty)
                       Padding(
                         padding: const EdgeInsets.only(top: 12),
-                        child: Text(_saved, style: const TextStyle(color: Colors.greenAccent)),
+                        child: Text(
+                          _saved,
+                          style: const TextStyle(color: Colors.greenAccent),
+                        ),
                       ),
+                    if (_checks.isNotEmpty) ...[
+                      const SizedBox(height: 14),
+                      const Divider(),
+                      const SizedBox(height: 8),
+                      ..._checks.map(
+                        (c) => Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 3),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Icon(
+                                c.ok ? Icons.check_circle : Icons.error_outline,
+                                size: 18,
+                                color: c.ok
+                                    ? Colors.greenAccent
+                                    : Colors.orangeAccent,
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  '${c.name}: ${c.ok ? 'OK' : 'not working'}\n${c.detail}',
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    fontFamily: 'monospace',
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -563,4 +911,15 @@ class _SettingsPageState extends State<SettingsPage> {
       ),
     );
   }
+}
+
+String _joinPreview(String a, String b, String c) {
+  String join(String x, String y) {
+    if (x.isEmpty) return y;
+    if (y.isEmpty) return x;
+    if (x.endsWith('/') || x.endsWith('\\')) return '$x$y';
+    return '$x${Platform.pathSeparator}$y';
+  }
+
+  return join(join(a, b), c);
 }

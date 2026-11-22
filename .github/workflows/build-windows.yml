@@ -5,11 +5,13 @@ on:
     branches: [main]
     paths:
       - 'gui/**'
+      - 'installer/**'
       - '.github/workflows/build-windows.yml'
   pull_request:
     branches: [main]
     paths:
       - 'gui/**'
+      - 'installer/**'
       - '.github/workflows/build-windows.yml'
   workflow_dispatch:
 
@@ -49,6 +51,37 @@ jobs:
         working-directory: gui
         run: flutter build windows --release
 
+      - name: Bundle yt-dlp and ffmpeg
+        shell: pwsh
+        working-directory: gui
+        run: |
+          $release = @(
+            'build/windows/x64/runner/Release',
+            'build/windows/x64/release'
+          ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $release) { throw 'No Windows release directory found' }
+          $tools = Join-Path $release 'tools'
+          New-Item -ItemType Directory -Force -Path $tools | Out-Null
+
+          $headers = @{ 'User-Agent' = 'Music2DAP-CI' }
+          Invoke-WebRequest -Headers $headers `
+            -Uri 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe' `
+            -OutFile (Join-Path $tools 'yt-dlp.exe')
+
+          $zip = Join-Path $env:RUNNER_TEMP 'ffmpeg-win64.zip'
+          $dir = Join-Path $env:RUNNER_TEMP 'ffmpeg-win64'
+          Invoke-WebRequest -Headers $headers `
+            -Uri 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip' `
+            -OutFile $zip
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          tar -xf $zip -C $dir
+          $ffmpeg = Get-ChildItem -Path $dir -Filter ffmpeg.exe -Recurse | Select-Object -First 1
+          $ffprobe = Get-ChildItem -Path $dir -Filter ffprobe.exe -Recurse | Select-Object -First 1
+          if (-not $ffmpeg -or -not $ffprobe) { throw 'ffmpeg/ffprobe not found in downloaded archive' }
+          Copy-Item $ffmpeg.FullName (Join-Path $tools 'ffmpeg.exe') -Force
+          Copy-Item $ffprobe.FullName (Join-Path $tools 'ffprobe.exe') -Force
+          Get-ChildItem $tools | Format-Table Name, Length
+
       - name: Package artifact
         shell: pwsh
         working-directory: gui
@@ -66,5 +99,28 @@ jobs:
         with:
           name: music2dap-windows
           path: music2dap-windows.zip
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Install Inno Setup
+        run: choco install innosetup -y --no-progress
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $candidates = @()
+          if ($env:ProgramFiles) { $candidates += Join-Path $env:ProgramFiles 'Inno Setup 6\ISCC.exe' }
+          $pf86 = [Environment]::GetEnvironmentVariable('ProgramFiles(x86)')
+          if ($pf86) { $candidates += Join-Path $pf86 'Inno Setup 6\ISCC.exe' }
+          $iscc = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $iscc) { throw 'Inno Setup compiler not found' }
+          & $iscc (Join-Path $env:GITHUB_WORKSPACE 'installer\music2dap.iss')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: music2dap-windows-installer
+          path: installer-output/Music2DAP-setup.exe
           if-no-files-found: error
           retention-days: 30
