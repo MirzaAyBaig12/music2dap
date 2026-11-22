@@ -1,0 +1,70 @@
+name: Build Windows GUI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'gui/**'
+      - '.github/workflows/build-windows.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'gui/**'
+      - '.github/workflows/build-windows.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.50.1'
+          channel: stable
+          cache: true
+
+      - name: Enable Windows desktop
+        run: flutter config --enable-windows-desktop
+
+      - name: Flutter version
+        run: flutter --version
+
+      - name: Install MSVC build tools
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install dependencies
+        working-directory: gui
+        run: flutter pub get
+
+      - name: Analyze
+        working-directory: gui
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+
+      - name: Build Windows release
+        working-directory: gui
+        run: flutter build windows --release
+
+      - name: Package artifact
+        shell: pwsh
+        working-directory: gui
+        run: |
+          $release = @(
+            'build/windows/x64/runner/Release',
+            'build/windows/x64/release'
+          ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $release) { throw 'No Windows release directory found' }
+          Write-Host "Packaging $release"
+          Compress-Archive -Path (Join-Path $release '*') -DestinationPath ../music2dap-windows.zip -Force
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: music2dap-windows
+          path: music2dap-windows.zip
+          if-no-files-found: error
+          retention-days: 30
