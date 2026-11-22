@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+from collections import Counter
 import html
 import json
 import os
@@ -1117,13 +1118,17 @@ class Result:
     size: int = 0
     no_lyrics: bool = False
     no_source: bool = False
+    source_added: bool = False
+    source_refreshed: bool = False
+    cover_refreshed: bool = False
+    lyrics_source: str = ""
 
 
 def process_track(job: Job, dev: Device, yt, workdir: Path) -> Result:
     # 1. Spotify metadata -------------------------------------------------
     job.set("meta", "active")
     t = spotify_track(job.sid)
-    job.title = f"{', '.join(t.artists)} — {t.title}"
+    job.title = f"{artist_label(t.artists)} — {t.title}"
     year = f" ({t.date[:4]})" if t.date else ""
     meta_detail = f"{t.album or 'no album listed'}{year}"
     job.set("meta", "done", meta_detail)
@@ -1379,6 +1384,87 @@ def summary(results: list[Result], elapsed: float, interrupted: bool, verb: str 
     return Panel(
         Group(*body),
         title=Text(" done ", style=f"bold {BASE} on {colour}"),
+        title_align="left",
+        border_style=colour,
+        box=box.ROUNDED,
+        padding=(1, 2),
+    )
+
+
+def update_summary(results: list[Result], elapsed: float, interrupted: bool) -> Panel:
+    """Detailed report for --update-metadata: counts + every track's changes."""
+    ok = [r for r in results if r.status == "ok"]
+    failed = [r for r in results if r.status == "fail"]
+    no_source = [r for r in ok if r.no_source]
+    no_lyrics = [r for r in ok if r.no_lyrics]
+    with_source = [r for r in ok if not r.no_source]
+
+    added = sum(r.source_added for r in ok)
+    refreshed = sum(r.source_refreshed for r in ok)
+    unchanged = max(0, len(with_source) - added - refreshed)
+    covers = sum(r.cover_refreshed for r in ok)
+    lyrics = Counter(r.lyrics_source for r in ok if r.lyrics_source)
+
+    line = Text()
+    line.append(f"✓ {len(ok)} updated", style=f"bold {GREEN}")
+    if failed:
+        line.append(f"   ✗ {len(failed)} failed", style=f"bold {RED}")
+    line.append(f"   · {fmt_time(elapsed)}", style=DIM)
+
+    body: list = [line, Text("")]
+    body.append(Text.assemble(
+        ("SOURCE   ", SUB),
+        (f"{added} added", GREEN if added else DIM), ("   "),
+        (f"{refreshed} refreshed", GREEN if refreshed else DIM), ("   "),
+        (f"{unchanged} unchanged", DIM),
+    ))
+    if no_source:
+        body[-1].append(f"   {len(no_source)} not found", style=f"bold {YELLOW}")
+
+    lyric_line = Text.assemble(("Lyrics    ", SUB))
+    if lyrics:
+        for i, (source, count) in enumerate(sorted(lyrics.items())):
+            if i:
+                lyric_line.append("   ", style=DIM)
+            lyric_line.append(f"{count} {source}", style=TEXT)
+    else:
+        lyric_line.append("none found", style=DIM)
+    if no_lyrics:
+        lyric_line.append(f"   {len(no_lyrics)} missing", style=f"bold {YELLOW}")
+    body.append(lyric_line)
+    body.append(Text.assemble(("Cover     ", SUB), (f"{covers} refreshed", GREEN if covers else DIM)))
+
+    if interrupted:
+        body.append(Text(""))
+        body.append(Text("stopped early (ctrl-c)", style=YELLOW))
+
+    attention = failed + no_source + no_lyrics
+    if attention:
+        body.append(Text(""))
+        body.append(Text("needs attention", style=f"bold {YELLOW}"))
+        for r in attention:
+            mark = "✗" if r.status == "fail" else "!"
+            colour = RED if r.status == "fail" else YELLOW
+            body.append(Text.assemble((f"  {mark} ", colour), (r.label, TEXT),
+                                      ("  — " + r.note if r.note else "", DIM)))
+
+    body.append(Text(""))
+    body.append(Text("tracks", style=f"bold {SUB}"))
+    for r in results:
+        if r.status == "fail":
+            mark, colour = "✗", RED
+        elif r.no_source or r.no_lyrics:
+            mark, colour = "!", YELLOW
+        else:
+            mark, colour = "✓", GREEN
+        where = r.folder + " — " if r.folder else ""
+        body.append(Text.assemble((f"  {mark} ", colour), (r.label, TEXT)))
+        body.append(Text.assemble(("      " + where, DIM), (r.note, DIM)))
+
+    colour = RED if failed and not ok else YELLOW if failed or no_lyrics or no_source or interrupted else GREEN
+    return Panel(
+        Group(*body),
+        title=Text(" update summary ", style=f"bold {BASE} on {colour}"),
         title_align="left",
         border_style=colour,
         box=box.ROUNDED,
@@ -1850,7 +1936,7 @@ def update_one(path: Path, yt, job: Job, root: Path | None) -> Result:
     if f is None:
         raise PipelineError(f"unsupported audio format: {path.suffix}")
     old = track_from_tags(f, path)
-    job.title = f"{', '.join(old.artists) or '?'} — {old.title}"
+    job.title = f"{artist_label(old.artists) or '?'} — {old.title}"
     existing_source = tag_value(f, "SOURCE") or tag_value(f, "COMMENT")
 
     # 1. Spotify link: SOURCE tag first, then the older COMMENT tag, then search.
@@ -1907,12 +1993,15 @@ def update_one(path: Path, yt, job: Job, root: Path | None) -> Result:
     tag_audio(path, t, cover, lyrics, source_link=source_link)
 
     notes = []
+    source_added = source_refreshed = False
     if not source_link:
         notes.append("no Spotify URL found")
     if source_link and not existing_source:
         notes.append("SOURCE added")
+        source_added = True
     elif source_link and source_link != existing_source:
         notes.append("SOURCE refreshed")
+        source_refreshed = True
     if lyrics:
         notes.append(f"lyrics: {lyrics.source}")
     else:
@@ -1922,7 +2011,9 @@ def update_one(path: Path, yt, job: Job, root: Path | None) -> Result:
     folder = str(path.parent.relative_to(root)) if root and path.parent.is_relative_to(root) else path.parent.name
     job.set("tag", "done", f"{len(notes)} changes written")
     return Result("ok", job.title, folder, ", ".join(notes),
-                  no_lyrics=not lyrics, no_source=not source_link)
+                  no_lyrics=not lyrics, no_source=not source_link,
+                  source_added=source_added, source_refreshed=source_refreshed,
+                  cover_refreshed=bool(cover), lyrics_source=lyrics.source if lyrics else "")
 
 
 def normalize_music_dir(value: str | None) -> str:
@@ -2047,7 +2138,7 @@ def run_update(paths: list[str], music_dir: str) -> None:
         except KeyboardInterrupt:
             interrupted = True
     os.sync()
-    console.print(summary(screen.results, time.time() - started, interrupted, verb="updated"))
+    console.print(update_summary(screen.results, time.time() - started, interrupted))
     if any(r.status == "fail" for r in screen.results):
         raise SystemExit(1)
 
