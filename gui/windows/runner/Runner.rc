@@ -89,13 +89,13 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "com.mirzaaybaig" "\0"
-            VALUE "FileDescription", "music2dap_gui" "\0"
+            VALUE "CompanyName", "Mirza Ay Baig" "\0"
+            VALUE "FileDescription", "Music2DAP" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "music2dap_gui" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 com.mirzaaybaig. All rights reserved." "\0"
-            VALUE "OriginalFilename", "music2dap_gui.exe" "\0"
-            VALUE "ProductName", "music2dap_gui" "\0"
+            VALUE "InternalName", "music2dap" "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 Mirza Ay Baig. All rights reserved." "\0"
+            VALUE "OriginalFilename", "music2dap.exe" "\0"
+            VALUE "ProductName", "Music2DAP" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END
