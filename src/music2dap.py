@@ -1087,6 +1087,7 @@ class Result:
     note: str = ""
     size: int = 0
     no_lyrics: bool = False
+    no_source: bool = False
 
 
 def process_track(job: Job, dev: Device, yt, workdir: Path) -> Result:
@@ -1304,10 +1305,13 @@ def summary(results: list[Result], elapsed: float, interrupted: bool, verb: str 
     skipped = [r for r in results if r.status == "skip"]
     failed = [r for r in results if r.status == "fail"]
     no_lyrics = [r for r in ok if r.no_lyrics]
+    no_source = [r for r in ok if r.no_source]
     line = Text()
     line.append(f"✓ {len(ok)} {verb}", style=f"bold {GREEN}")
     if skipped:
         line.append(f"   ↷ {len(skipped)} already there", style=YELLOW)
+    if no_source:
+        line.append(f"   ! {len(no_source)} without Spotify URL", style=f"bold {YELLOW}")
     if no_lyrics:
         line.append(f"   ! {len(no_lyrics)} without lyrics", style=f"bold {YELLOW}")
     if failed:
@@ -1320,6 +1324,13 @@ def summary(results: list[Result], elapsed: float, interrupted: bool, verb: str 
         body.append(Text(""))
         for r in failed:
             body.append(Text.assemble(("✗ ", RED), (r.label, TEXT), ("\n   " + r.note, DIM)))
+    if no_source:
+        body.append(Text(""))
+        for r in no_source:
+            body.append(Text.assemble(
+                ("! ", YELLOW), (r.label, TEXT),
+                ("\n   no matching Spotify song found (SOURCE left empty)", DIM),
+            ))
     if no_lyrics:
         body.append(Text(""))
         for r in no_lyrics:
@@ -1335,7 +1346,7 @@ def summary(results: list[Result], elapsed: float, interrupted: bool, verb: str 
                 style=DIM,
             )
         )
-    colour = RED if failed and not ok else YELLOW if failed or no_lyrics or interrupted else GREEN
+    colour = RED if failed and not ok else YELLOW if failed or no_lyrics or no_source or interrupted else GREEN
     return Panel(
         Group(*body),
         title=Text(" done ", style=f"bold {BASE} on {colour}"),
@@ -1458,37 +1469,144 @@ def source_id(raw: str) -> str:
     return parsed[1] if parsed and parsed[0] == "track" else ""
 
 
-def spotify_search_id(title: str, artists: list[str]) -> str:
-    """Last resort for a file with no SOURCE/COMMENT: find its Spotify link."""
+def _bare_title(value: str) -> str:
+    """'Assalamu Alayka (Arabic)' -> 'assalamu alayka'."""
+    return norm(re.sub(r"\s*[\(\[].*?[\)\]]", "", value))
+
+
+_seed_ids: set[str] = set()
+_artist_index: dict[str, dict[str, str]] = {}
+_artist_names: dict[str, set[str]] = {}
+_index_done = False
+
+
+def register_source_seeds(files: list[Path]) -> None:
+    """Existing SOURCE links seed the catalogue lookup for the whole library."""
+    for path in files:
+        try:
+            f = mutagen.File(path)
+        except Exception:
+            continue
+        if f is None:
+            continue
+        sid = source_id(tag_value(f, "SOURCE") or tag_value(f, "COMMENT"))
+        if sid:
+            _seed_ids.add(sid)
+
+
+def _artist_ids_for(sid: str) -> list[str]:
+    try:
+        ent = embed_entity("track", sid)
+    except Exception:
+        return []
+    ids = []
+    for a in ent.get("artists") or []:
+        m = re.match(r"spotify:artist:([A-Za-z0-9]{22})", a.get("uri", ""))
+        if m:
+            ids.append(m.group(1))
+    return ids
+
+
+def build_artist_index() -> None:
+    """Crawl public Spotify pages for every artist we already know about.
+
+    No API key and no search engines: one known track gives the artist id, the
+    artist page lists the albums, and each album's embed page lists its tracks.
+    All of it is cached in memory for the run.
+    """
+    global _index_done
+    if _index_done:
+        return
+    _index_done = True
+    for sid in list(_seed_ids)[:60]:
+        for aid in _artist_ids_for(sid):
+            bucket = _artist_index.setdefault(aid, {})
+            names = _artist_names.setdefault(aid, set())
+            try:
+                ent = embed_entity("artist", aid)
+                if ent.get("name"):
+                    names.add(norm(ent["name"]))
+                for item in ent.get("trackList") or []:
+                    m = re.match(r"spotify:track:([A-Za-z0-9]{22})", item.get("uri", ""))
+                    if m and item.get("title"):
+                        bucket.setdefault(norm(item["title"]), m.group(1))
+                        bucket.setdefault(_bare_title(item["title"]), m.group(1))
+            except Exception:
+                pass
+            try:
+                page = get(f"https://open.spotify.com/artist/{aid}").text
+                album_ids = list(dict.fromkeys(re.findall(r"/album/([A-Za-z0-9]{22})", page)))
+            except Exception:
+                album_ids = []
+            for alb in album_ids[:60]:
+                try:
+                    aent = embed_entity("album", alb)
+                except Exception:
+                    continue
+                for item in aent.get("trackList") or []:
+                    m = re.match(r"spotify:track:([A-Za-z0-9]{22})", item.get("uri", ""))
+                    if m and item.get("title"):
+                        bucket.setdefault(norm(item["title"]), m.group(1))
+                        bucket.setdefault(_bare_title(item["title"]), m.group(1))
+
+
+def spotify_search_id(title: str, artists: list[str], album: str = "") -> str:
+    """Find a file's Spotify id from its tags, then fall back to web search."""
     key = norm(title) + "|" + ",".join(norm(a) for a in artists)
     if key in _source_search_cache:
         return _source_search_cache[key]
-    q = f"site:open.spotify.com/track {artists[0] if artists else ''} {title}"
-    link_re = r"open\.spotify\.com/(?:intl-[^/]+/)?track/([A-Za-z0-9]{22})"
-    ids: list[str] = []
-    # Bing's RSS feed is the most reliable; DDG is there if Bing rate-limits.
-    for base, params in (
-        ("https://www.bing.com/search", {"format": "rss", "q": q}),
-        ("https://html.duckduckgo.com/html/", {"q": q}),
-        ("https://lite.duckduckgo.com/lite/", {"q": q}),
-    ):
-        r = get_quiet(base + "?" + urlencode(params), lyric_http)
-        if r:
-            ids = list(dict.fromkeys(re.findall(link_re, html.unescape(r.text))))
-        if ids:
+
+    build_artist_index()
+    found = ""
+    for artist in artists or [""]:
+        na = norm(artist)
+        for aid, names in _artist_names.items():
+            if not (na in names or any(similar(na, n) >= 2.4 for n in names)):
+                continue
+            bucket = _artist_index[aid]
+            for candidate in (norm(title), _bare_title(title)):
+                if candidate in bucket:
+                    found = bucket[candidate]
+                    break
+            if not found:
+                best, score = "", 0.0
+                for name, tid in bucket.items():
+                    sc = similar(_bare_title(title), name)
+                    if sc > score:
+                        best, score = tid, sc
+                if score >= 2.4:
+                    found = best
+            if found:
+                break
+        if found:
             break
-    best, score = "", 0.0
-    for sid in ids[:12]:
-        try:
-            cand = spotify_track(sid)
-        except Exception:
-            continue
-        s = similar(title, cand.title)
-        if artist_ok(artists, cand.artists):
-            s += 2
-        if s > score:
-            best, score = sid, s
-    found = best if score >= 4.5 else ""
+
+    if not found:
+        q = f"site:open.spotify.com/track {artists[0] if artists else ''} {title}"
+        link_re = r"open\.spotify\.com/(?:intl-[^/]+/)?track/([A-Za-z0-9]{22})"
+        ids: list[str] = []
+        for base, params in (
+            ("https://www.bing.com/search", {"format": "rss", "q": q}),
+            ("https://html.duckduckgo.com/html/", {"q": q}),
+        ):
+            r = get_quiet(base + "?" + urlencode(params), lyric_http)
+            if r:
+                ids = list(dict.fromkeys(re.findall(link_re, html.unescape(r.text))))
+            if ids:
+                break
+        best, score = "", 0.0
+        for sid in ids[:12]:
+            try:
+                cand = spotify_track(sid)
+            except Exception:
+                continue
+            sc = similar(title, cand.title)
+            if artist_ok(artists, cand.artists):
+                sc += 2
+            if sc > score:
+                best, score = sid, sc
+        found = best if score >= 4.5 else ""
+
     _source_search_cache[key] = found
     return found
 
@@ -1567,6 +1685,7 @@ def update_one(path: Path, yt, job: Job, root: Path | None) -> Result:
             sid = ""
     t = old
     if sid:
+        # A failed metadata refresh must not lose a perfectly good Spotify id.
         try:
             fresh = spotify_track(sid)
             if similar(old.title, fresh.title) >= 2.0 and artist_ok(old.artists, fresh.artists):
@@ -1578,12 +1697,8 @@ def update_one(path: Path, yt, job: Job, root: Path | None) -> Result:
                         fill_gaps(yt, t, hit)
                 except Exception:
                     pass
-            else:
-                t = old
-                sid = ""
         except Exception:
-            t = old
-            sid = ""
+            pass
     source_link = f"https://open.spotify.com/track/{sid}" if sid else existing_source
     job.set(
         "meta", "done" if source_link else "skip",
@@ -1609,6 +1724,8 @@ def update_one(path: Path, yt, job: Job, root: Path | None) -> Result:
     tag_audio(path, t, cover, lyrics, source_link=source_link)
 
     notes = []
+    if not source_link:
+        notes.append("no Spotify URL found")
     if source_link and not existing_source:
         notes.append("SOURCE added")
     elif source_link and source_link != existing_source:
@@ -1621,22 +1738,63 @@ def update_one(path: Path, yt, job: Job, root: Path | None) -> Result:
         notes.append("cover refreshed")
     folder = str(path.parent.relative_to(root)) if root and path.is_relative_to(root) else path.parent.name
     job.set("tag", "done", f"{len(notes)} changes written")
-    return Result("ok", job.title, folder, ", ".join(notes), no_lyrics=not lyrics)
+    return Result("ok", job.title, folder, ", ".join(notes),
+                  no_lyrics=not lyrics, no_source=not source_link)
+
+
+def normalize_music_dir(value: str | None) -> str:
+    """`/Music/`, `Music/`, ` Music ` all become `Music`."""
+    return (value or "Music").strip().strip("/\\").strip() or "Music"
 
 
 def resolve_scan_roots(paths: list[str], music_dir: str) -> list[Path]:
-    """A bare root means '<root>/Music' when that folder exists (or the
-    configured --music-dir); pointing straight at the music folder also works.
+    """Only ever scan Music folders (or explicitly named audio files).
+
+    - an audio file is taken as-is
+    - a directory named <music-dir> is scanned directly
+    - a directory containing <music-dir> scans just that child
+    - otherwise only descendant folders named <music-dir> are scanned;
+      Audiobooks/, Quran/, Podcasts/ etc. are never swept up by accident.
     """
     roots: list[Path] = []
     for raw in paths:
         p = Path(raw).expanduser()
-        if p.is_dir():
-            candidate = p / music_dir
-            roots.append(candidate if candidate.is_dir() else p)
-        else:
+        if p.is_file():
+            if p.suffix.lower() in AUDIO_EXTS:
+                roots.append(p)
+            continue
+        if not p.is_dir():
+            roots.append(p)  # scan_audio reports it as invalid
+            continue
+        if p.name.casefold() == music_dir.casefold():
             roots.append(p)
-    return roots
+            continue
+        child = p / music_dir
+        if child.is_dir():
+            roots.append(child)
+            continue
+        nested = sorted({d for d in p.rglob(music_dir) if d.is_dir()})
+        if nested:
+            roots.extend(nested)
+        else:
+            console.print(Text(
+                f"  ! no '{music_dir}' folder under {p}; skipping "
+                "(pass the music folder explicitly)", style=YELLOW,
+            ))
+    return list(dict.fromkeys(roots))
+
+
+def default_scan_path(mount_root: str, device: str, music_dir: str) -> str:
+    """Where --doctor / --update-metadata look when no path was given."""
+    root = Path(mount_root).expanduser()
+    candidates = [root / device / music_dir, root / music_dir, root / device, root]
+    for c in candidates:
+        if not c.is_dir():
+            continue
+        resolved = resolve_scan_roots([str(c)], music_dir)
+        if resolved and all(x.is_dir() for x in resolved):
+            return str(resolved[0])
+    return str(root / device / music_dir)
 
 
 def scan_audio(paths: list[str], music_dir: str) -> tuple[list[Path], Path | None]:
@@ -1660,6 +1818,7 @@ def run_update(paths: list[str], music_dir: str) -> None:
     if not files:
         console.print(Text("  no supported audio files found to update.", style=RED))
         raise SystemExit(1)
+    register_source_seeds(files)
 
     console.print(
         Panel(
@@ -1862,19 +2021,21 @@ def main() -> None:
     args = p.parse_args()
     global ACTIVE_FORMAT
     ACTIVE_FORMAT = FORMATS[args.format]
-    music_dir = args.music_dir or os.environ.get("MUSIC2DAP_MUSIC_DIR") or "Music"
+    music_dir = normalize_music_dir(args.music_dir or os.environ.get("MUSIC2DAP_MUSIC_DIR"))
+    scan_targets = args.urls or [default_scan_path(args.mount_root, args.device, music_dir)]
 
     if args.doctor and args.update_metadata:
         p.error("use either --doctor or --update-metadata, not both")
 
+    if not args.urls:
+        console.print(Text(f"  scanning {scan_targets[0]}", style=DIM))
+
     if args.doctor:
-        run_doctor(args.urls or ["."], music_dir)
+        run_doctor(scan_targets, music_dir)
         return
 
     if args.update_metadata:
-        if not args.urls:
-            p.error("--update-metadata needs at least one audio file or folder")
-        run_update(args.urls, music_dir)
+        run_update(scan_targets, music_dir)
         return
 
     if not shutil.which("ffmpeg"):
