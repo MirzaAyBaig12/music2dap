@@ -785,11 +785,19 @@ def lrclib_lyrics(t: Track, duration: int = 0) -> Lyrics | None:
     row = None
     if r:
         try:
-            row = r.json()
+            candidate = r.json()
         except ValueError:
-            pass
-    if row and row.get("instrumental"):
-        return None
+            candidate = None
+        if candidate and candidate.get("instrumental"):
+            return None
+        # /api/get is a best-match endpoint, not a guarantee: keep it only when
+        # the returned artist and title actually agree with Spotify's metadata.
+        if (
+            candidate
+            and artist_ok(t.artists, [candidate.get("artistName", "")])
+            and similar(t.title, candidate.get("trackName") or "") >= 2.5
+        ):
+            row = candidate
     if not row:
         q = " ".join(([t.artists[0]] if t.artists else []) + [t.title])
         r = get_quiet("https://lrclib.net/api/search?" + urlencode({"q": q}))
@@ -838,10 +846,11 @@ def genius_lyrics(t: Track) -> Lyrics | None:
                 best, score = row["path"], s
         return best
 
-    # Most tracks match on artist + title. Some nasheeds are on Genius only
-    # under the well-known singer, so retry on title alone.
+    # Require the artist to match. A title-only retry used to attach lyrics
+    # from unrelated songs with the same name (e.g. Maher Zain's
+    # "Huwa Ahmadun" to an Adzando Davema track), so it is deliberately gone.
     q = " ".join(([t.artists[0]] if t.artists else []) + [t.title])
-    path = find_path(q, True) or find_path(t.title, False)
+    path = find_path(q, True)
     if not path:
         return None
     page = get_quiet("https://genius.com" + path, lyric_http)
