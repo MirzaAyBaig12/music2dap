@@ -216,6 +216,26 @@ def banner(dev: Device) -> Panel:
     )
 
 
+def device_not_mounted(mount_root: str, device: str, expected: str) -> None:
+    """--doctor / --update-metadata need the DAP mounted; say so clearly."""
+    root = Path(mount_root).expanduser()
+    try:
+        mounted = sorted(p.name for p in root.iterdir() if p.is_dir())
+    except OSError:
+        mounted = []
+    body = Text()
+    body.append("No device mounted — please plug in your DAP.\n", style=f"bold {RED}")
+    body.append(f"looked for {expected}\n", style=SUB)
+    if mounted:
+        body.append("mounted right now: ", style=DIM)
+        body.append(", ".join(mounted), style=TEXT)
+    else:
+        body.append("nothing is mounted under ", style=DIM)
+        body.append(str(root), style=TEXT)
+    console.print(Panel(body, border_style=RED, box=box.ROUNDED, padding=(1, 2)))
+    raise SystemExit(1)
+
+
 def wait_for_device(dev: Device) -> None:
     while not dev.present():
         try:
@@ -1805,6 +1825,8 @@ def scan_audio(paths: list[str], music_dir: str) -> tuple[list[Path], Path | Non
             files.extend(sorted(x for x in p.rglob("*") if x.is_file() and x.suffix.lower() in AUDIO_EXTS))
         elif p.is_file() and p.suffix.lower() in AUDIO_EXTS:
             files.append(p)
+        elif not p.exists():
+            console.print(Text(f"  ✗ path not found: {p}", style=RED))
         else:
             console.print(Text(f"  ✗ not an audio file or folder: {p}", style=RED))
     files = list(dict.fromkeys(files))
@@ -2026,6 +2048,9 @@ def main() -> None:
 
     if args.doctor and args.update_metadata:
         p.error("use either --doctor or --update-metadata, not both")
+
+    if not args.urls and (args.doctor or args.update_metadata) and not Path(scan_targets[0]).exists():
+        device_not_mounted(args.mount_root, args.device, scan_targets[0])
 
     if not args.urls:
         console.print(Text(f"  scanning {scan_targets[0]}", style=DIM))
