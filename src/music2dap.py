@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import base64
 from collections import Counter
+import io
 import html
 import json
 import os
@@ -74,10 +75,13 @@ class AudioFormat:
     codec: str
     codec_args: tuple = ()
     container: str = ""
+    direct_extract: bool = False  # yt-dlp -x --audio-format, no separate ffmpeg pass
 
 
 FORMATS = {
-    "FLAC": AudioFormat("FLAC", ".flac", "flac", ("-compression_level", "5")),
+    "FLAC": AudioFormat(
+        "FLAC", ".flac", "flac", ("-compression_level", "8"), direct_extract=True
+    ),
     "MP3": AudioFormat("MP3", ".mp3", "libmp3lame", ("-q:a", "2")),
     "OPUS": AudioFormat("OPUS", ".opus", "libopus", ("-b:a", "128k")),
 }
@@ -605,8 +609,13 @@ def clean_error(e: Exception) -> str:
     return re.sub(r"\x1b\[[0-9;]*m", "", str(e)).replace("ERROR: ", "").strip()
 
 
-def download_audio(video_id: str, workdir: Path, job: "Job") -> Path:
-    """Download the best raw audio stream from YT Music (no conversion yet)."""
+def download_audio(video_id: str, workdir: Path, job: "Job", fmt: AudioFormat) -> Path:
+    """Download audio from YT Music.
+
+    For FLAC this is the full audio-only extraction: yt-dlp itself runs
+    ffmpeg (-x --audio-format flac, max compression) and prints the final path.
+    Other formats download the raw stream for the separate encode_audio pass.
+    """
     import yt_dlp
 
     def on_progress(d):
@@ -619,9 +628,11 @@ def download_audio(video_id: str, workdir: Path, job: "Job") -> Path:
         elif d["status"] == "finished":
             job.set("dl", "done", f"{fmt_bytes(job.dl[1] or job.dl[0])} from YT Music")
 
+    direct = fmt.direct_extract
+    prefix = "track" if direct else "source"
     opts = {
-        "format": "bestaudio/best",
-        "outtmpl": str(workdir / "source.%(ext)s"),
+        "format": "bestaudio[ext=flac]/bestaudio" if direct else "bestaudio/best",
+        "outtmpl": str(workdir / f"{prefix}.%(ext)s"),
         "quiet": True,
         "no_warnings": True,
         "noprogress": True,
@@ -631,14 +642,51 @@ def download_audio(video_id: str, workdir: Path, job: "Job") -> Path:
         "progress_hooks": [on_progress],
         "js_runtimes": js_runtimes(),
     }
+    if direct:
+        # Equivalent to:
+        #   yt-dlp -f "bestaudio[ext=flac]/bestaudio" -x --audio-format flac \
+        #     --postprocessor-args "ffmpeg:-vn -compression_level 8" \
+        #     --no-playlist --retries 5 --fragment-retries 5 \
+        #     --print "after_move:filepath" -o "track.%(ext)s" URL
+        opts.update({
+            # Python-API form of `-x --audio-format flac` (those CLI flags are
+            # translated into a postprocessor by yt-dlp's CLI, not read here).
+            "postprocessors": [{
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "flac",
+                "preferredquality": "5",
+                "nopostoverwrites": False,
+            }],
+            "postprocessor_args": {"ffmpeg": ["-vn", "-compression_level", "8"]},
+            "forceprint": {"after_move": ["filepath"]},
+        })
+
+    printed = io.StringIO()
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
+            if direct:
+                # Capture only yt-dlp's --print output; leave the Rich UI's
+                # stdout alone.
+                ydl._out_files.out = printed
             ydl.download([f"https://music.youtube.com/watch?v={video_id}"])
     except yt_dlp.utils.DownloadError as e:
         raise PipelineError(f"download failed: {clean_error(e)}") from e
+
+    if direct:
+        # --print after_move:filepath returns the final, audio-only FLAC path.
+        for line in reversed(printed.getvalue().splitlines()):
+            candidate = Path(line.strip())
+            if candidate.is_file() and candidate.suffix.lower() == ".flac":
+                return candidate
+        files = [p for p in workdir.glob(f"{prefix}.*.flac") if p.is_file()]
+        files += [p for p in workdir.glob(f"{prefix}.flac") if p.is_file()]
+        if files:
+            return max(files, key=lambda p: p.stat().st_mtime)
+        raise PipelineError("yt-dlp did not produce a FLAC file")
+
     files = [
         p for p in workdir.iterdir()
-        if p.is_file() and p.name.startswith("source.") and not p.name.endswith(".part")
+        if p.is_file() and p.name.startswith(f"{prefix}.") and not p.name.endswith(".part")
     ]
     if not files:
         raise PipelineError("no audio was downloaded")
@@ -1206,10 +1254,14 @@ def process_track(job: Job, dev: Device, yt, workdir: Path) -> Result:
 
     # 3+4. download + transcode ----------------------------------------------
     job.set("dl", "active")
-    raw = download_audio(hit["videoId"], workdir, job)
-    job.set("encode", "active", f"ffmpeg → {ACTIVE_FORMAT.name}")
-    audio = encode_audio(raw, workdir / f"audio{ACTIVE_FORMAT.ext}", ACTIVE_FORMAT)
-    job.set("encode", "done", fmt_bytes(audio.stat().st_size))
+    downloaded = download_audio(hit["videoId"], workdir, job, ACTIVE_FORMAT)
+    if ACTIVE_FORMAT.direct_extract:
+        audio = downloaded
+        job.set("encode", "skip", f"yt-dlp extracted {ACTIVE_FORMAT.name} directly")
+    else:
+        job.set("encode", "active", f"ffmpeg → {ACTIVE_FORMAT.name}")
+        audio = encode_audio(downloaded, workdir / f"audio{ACTIVE_FORMAT.ext}", ACTIVE_FORMAT)
+        job.set("encode", "done", fmt_bytes(audio.stat().st_size))
 
     # 5. lyrics + tag + cover ---------------------------------------------------
     job.set("lyrics", "active")

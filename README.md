@@ -1,8 +1,10 @@
 # Music2DAP
 
 Spotify links in, tagged audio on your DAP out. No Spotify API key: metadata and
-cover come from Spotify's public pages, audio is matched on YouTube Music and
-transcoded by ffmpeg. Lyrics come from LRCLIB, then Genius, then YouTube Music.
+cover come from Spotify's public pages, audio is matched on YouTube Music. FLAC
+is extracted audio-only by yt-dlp at maximum compression (no video file is
+produced); MP3 and OPUS are downloaded then transcoded by ffmpeg. Lyrics come
+from LRCLIB, then Genius, then YouTube Music.
 
 ```nix
 {
@@ -34,8 +36,11 @@ Albums with a single track (and tracks with no album) go into
 
 ## Formats
 
-`preferredFormat` accepts `FLAC` (default), `MP3` and `OPUS`. Override per run
-with `music2dap --format MP3` or `$MUSIC2DAP_FORMAT`.
+`preferredFormat` accepts `FLAC` (default), `MP3` and `OPUS`. FLAC uses
+yt-dlp's `-x --audio-format flac --postprocessor-args "ffmpeg:-vn -compression_level 8"`
+and prints the final path via `--print after_move:filepath`; MP3/OPUS use the
+ffmpeg transcode step. Override per run with `music2dap --format MP3` or
+`$MUSIC2DAP_FORMAT`.
 
 ## Refreshing and checking an existing library
 

@@ -17,7 +17,8 @@
 # Music2DAP: paste Spotify links, get tagged audio in
 # <device>/Music/<Artist>/<Album>/ (Singles for one-track albums).
 #   - Spotify metadata + cover: public pages, no API key
-#   - audio: matched on YouTube Music, downloaded with yt-dlp, transcoded by ffmpeg
+#   - audio: matched on YouTube Music; FLAC is extracted audio-only by yt-dlp at
+#     maximum compression, MP3/OPUS are downloaded then transcoded by ffmpeg
 #   - YT Music only fills fields Spotify doesn't know
 #   - lyrics: LRCLIB, Genius, then YT Music
 #   - SOURCE tag stores the Spotify URL for --update-metadata / --doctor

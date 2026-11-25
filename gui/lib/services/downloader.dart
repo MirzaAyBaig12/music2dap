@@ -24,7 +24,7 @@ class AudioFormatInfo {
 }
 
 const audioFormats = <String, AudioFormatInfo>{
-  'FLAC': AudioFormatInfo('FLAC', 'flac', 'flac', ['-compression_level', '5']),
+  'FLAC': AudioFormatInfo('FLAC', 'flac', 'flac', ['-compression_level', '8']),
   'MP3': AudioFormatInfo(
     'MP3',
     'mp3',
@@ -102,17 +102,47 @@ class Downloader {
     final temp = await Directory.systemTemp.createTemp('m2d_');
     try {
       _log('searching YouTube Music for: ${t.searchQuery}');
-      await _run(settings.ytdlp, [
-        '-f', 'bestaudio',
+      final isFlac = fmt.name == 'FLAC';
+      final ytdlpArgs = <String>[
+        '-f', isFlac ? 'bestaudio[ext=flac]/bestaudio' : 'bestaudio',
         '--no-playlist',
         '--no-warnings',
-        '-o', '${temp.path}${Platform.pathSeparator}raw.%(ext)s',
-        'ytmsearch1:${t.searchQuery}',
-      ]);
-      final raw = temp.listSync().whereType<File>().firstWhere(
-            (f) => f.path.split(Platform.pathSeparator).last.startsWith('raw.'),
-            orElse: () => throw StateError('yt-dlp did not produce an audio file'),
-          );
+        '--retries', '5',
+        '--fragment-retries', '5',
+      ];
+      if (isFlac) {
+        // Audio-only FLAC at max compression; yt-dlp prints the final path.
+        ytdlpArgs.addAll([
+          '-x', '--audio-format', 'flac',
+          '--postprocessor-args', 'ffmpeg:-vn -compression_level 8',
+          '--print', 'after_move:filepath',
+          '-o', '${temp.path}${Platform.pathSeparator}track.%(ext)s',
+        ]);
+      } else {
+        ytdlpArgs.addAll(['-o', '${temp.path}${Platform.pathSeparator}raw.%(ext)s']);
+      }
+      ytdlpArgs.add('ytmsearch1:${t.searchQuery}');
+      final ytdlpOut = await _run(settings.ytdlp, ytdlpArgs);
+
+      late final File raw;
+      if (isFlac) {
+        final printed = ytdlpOut.map((s) => s.trim()).where((s) => s.isNotEmpty);
+        final path = printed.lastWhere(
+          (s) => s.toLowerCase().endsWith('.flac') && File(s).existsSync(),
+          orElse: () => '',
+        );
+        raw = path.isNotEmpty
+            ? File(path)
+            : temp.listSync().whereType<File>().firstWhere(
+                  (f) => f.path.toLowerCase().endsWith('.flac'),
+                  orElse: () => throw StateError('yt-dlp did not produce a FLAC file'),
+                );
+      } else {
+        raw = temp.listSync().whereType<File>().firstWhere(
+              (f) => f.path.split(Platform.pathSeparator).last.startsWith('raw.'),
+              orElse: () => throw StateError('yt-dlp did not produce an audio file'),
+            );
+      }
 
       Lyrics? lyrics;
       String source = '';

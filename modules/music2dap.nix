@@ -61,7 +61,9 @@ in
       description = ''
         Output format for downloaded audio. One of
         ${lib.concatStringsSep ", " (map (f: "`${f}`") formats)}.
-        Override per run with `music2dap --format`.
+        `FLAC` uses yt-dlp's audio-only extraction with maximum FLAC
+        compression (no video file is produced). Override per run with
+        `music2dap --format`.
       '';
     };
 
