@@ -1197,7 +1197,7 @@ class Result:
     title: str = ""
 
 
-def process_track(job: Job, dev: Device, yt, workdir: Path) -> Result:
+def process_track(job: Job, dev: Device, yt, workdir: Path, force: bool = False) -> Result:
     # 1. Spotify metadata -------------------------------------------------
     job.set("meta", "active")
     t = spotify_track(job.sid)
@@ -1231,7 +1231,7 @@ def process_track(job: Job, dev: Device, yt, workdir: Path) -> Result:
         job.set("copy", "skip", f"already in {folder_label(dev, p)}")
         return Result("skip", job.title, folder_label(dev, p), "already on device")
 
-    if (p := already_there()) is not None:
+    if not force and (p := already_there()) is not None:
         return skipped(p)
 
     # 2. YT Music match + gap filling ---------------------------------------
@@ -1249,7 +1249,7 @@ def process_track(job: Job, dev: Device, yt, workdir: Path) -> Result:
             "meta", "done",
             Text.assemble((meta_detail, SUB), ("   ↳ from YT Music: " + ", ".join(used), YELLOW)),
         )
-    if (p := already_there()) is not None:
+    if not force and (p := already_there()) is not None:
         return skipped(p)
 
     # 3+4. download + transcode ----------------------------------------------
@@ -1617,7 +1617,7 @@ def expand_all(items: list[tuple[str, str]]) -> list[str]:
     return list(dict.fromkeys(ids))
 
 
-def run_queue(dev: Device, ids: list[str]) -> None:
+def run_queue(dev: Device, ids: list[str], force: bool = False) -> None:
     from ytmusicapi import YTMusic
 
     yt = YTMusic()
@@ -1632,7 +1632,7 @@ def run_queue(dev: Device, ids: list[str]) -> None:
                 screen.job = job
                 with tempfile.TemporaryDirectory(prefix="music2dap-") as tmp:
                     try:
-                        res = process_track(job, dev, yt, Path(tmp))
+                        res = process_track(job, dev, yt, Path(tmp), force=force)
                     except PipelineError as e:
                         res = Result("fail", job.title, "", str(e))
                     except Exception as e:  # keep the queue going no matter what
@@ -2231,6 +2231,125 @@ def run_update(paths: list[str], music_dir: str) -> None:
 
 
 # --------------------------------------------------------------------------- #
+# --redownload: back up the library, then refetch every SOURCE-tagged track
+# --------------------------------------------------------------------------- #
+
+BACKUP_DIR_NAME = "music.bak"
+
+
+def enclosing_music_dir(path: Path, music_dir: str) -> Path | None:
+    """Closest ancestor (or the path itself) named <music-dir>."""
+    start = path if path.is_dir() else path.parent
+    for candidate in (start, *start.parents):
+        if candidate.name.casefold() == music_dir.casefold():
+            return candidate
+    return None
+
+
+def music_root_for(root: Path | None, files: list[Path], music_dir: str) -> Path:
+    """The scanned <music-dir> folder itself (where album folders live)."""
+    if root is not None:
+        return root if root.is_dir() else (enclosing_music_dir(root, music_dir) or root.parent)
+    if files:
+        return enclosing_music_dir(files[0], music_dir) or files[0].parent
+    raise PipelineError("no audio files found")
+
+
+def redownload_base(root: Path | None, files: list[Path], music_dir: str) -> Path:
+    """Device root: the parent of the scanned Music folder."""
+    music = music_root_for(root, files, music_dir)
+    return music.parent if music.name.casefold() == music_dir.casefold() else music
+
+
+def backup_library(files: list[Path], root: Path | None, music_dir: str) -> tuple[Path, int]:
+    music_root = music_root_for(root, files, music_dir)
+    backup = music_root.parent / BACKUP_DIR_NAME
+    if backup.exists() and any(p.is_file() for p in backup.rglob("*")):
+        raise PipelineError(
+            f"{backup} already contains files; move it aside before redownloading"
+        )
+    backup.mkdir(parents=True, exist_ok=True)
+    copied = 0
+    for path in files:
+        try:
+            rel = path.relative_to(music_root)
+        except ValueError:
+            rel = Path(path.parent.name) / path.name
+        dest = backup / rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            shutil.copy2(path, dest)
+        except OSError as e:
+            raise PipelineError(f"backup failed for {path}: {e.strerror}") from e
+        if dest.stat().st_size != path.stat().st_size:
+            raise PipelineError(f"backup size mismatch for {path}")
+        copied += 1
+    return backup, copied
+
+
+def redownload_sources(files: list[Path]) -> tuple[list[str], list[Path]]:
+    ids: list[str] = []
+    no_source: list[Path] = []
+    for path in files:
+        try:
+            f = mutagen.File(path)
+        except Exception:
+            f = None
+        sid = source_id(tag_value(f, "SOURCE") or tag_value(f, "COMMENT"))
+        if sid:
+            ids.append(sid)
+        else:
+            no_source.append(path)
+    return list(dict.fromkeys(ids)), no_source
+
+
+def run_redownload(paths: list[str], music_dir: str, args) -> None:
+    if not shutil.which("ffmpeg"):
+        console.print(Text("ffmpeg not found in PATH", style=RED))
+        raise SystemExit(1)
+
+    files, root = scan_audio(paths, music_dir)
+    if not files:
+        console.print(Text("  no supported audio files found to redownload.", style=RED))
+        raise SystemExit(1)
+    base = redownload_base(root, files, music_dir)
+    dev = Device(args.device, base, music_dir)
+    if not dev.present():
+        console.print(Text(f"library is not writable: {dev.library}", style=RED))
+        raise SystemExit(1)
+
+    ids, no_source = redownload_sources(files)
+    if not ids:
+        console.print(Text(
+            "  no Spotify SOURCE links found — nothing to redownload; no backup was made.",
+            style=YELLOW,
+        ))
+        raise SystemExit(1)
+
+    backup, copied = backup_library(files, root, music_dir)
+    console.print(
+        Panel(
+            Group(
+                Text(f"{copied} file{'s' if copied != 1 else ''} → {backup}", style=SUB),
+                Text(
+                    f"{len(ids)} Spotify source{'s' if len(ids) != 1 else ''} "
+                    f"→ {dev.library}", style=TEXT,
+                ),
+                Text(
+                    f"{len(no_source)} file{'s' if len(no_source) != 1 else ''} without a "
+                    "SOURCE tag are backed up but left in place", style=DIM,
+                ),
+                Text("each replacement is written atomically over the original", style=DIM),
+            ),
+            title=Text(" redownload ", style=f"bold {BASE} on {MAUVE}"),
+            title_align="left", border_style=MAUVE, box=box.ROUNDED, padding=(1, 2),
+        )
+    )
+    register_source_seeds(files)
+    run_queue(dev, ids, force=True)
+
+
+# --------------------------------------------------------------------------- #
 # --doctor: report which required tags/covers are missing, grouped by artist
 # --------------------------------------------------------------------------- #
 
@@ -2348,11 +2467,15 @@ def main() -> None:
     )
     p.add_argument(
         "urls", nargs="*",
-        help="Spotify links, or audio files/folders with --update-metadata",
+        help="Spotify links, or audio files/folders with --update-metadata / --redownload",
     )
     p.add_argument(
         "--update-metadata", "--metadata-update", action="store_true", dest="update_metadata",
         help="refresh tags, the Spotify SOURCE link and lyrics in existing audio files/folders",
+    )
+    p.add_argument(
+        "--redownload", action="store_true",
+        help="back up the library to music.bak, then redownload every file with a Spotify SOURCE tag",
     )
     p.add_argument(
         "--doctor", action="store_true",
@@ -2387,10 +2510,18 @@ def main() -> None:
     music_dir = normalize_music_dir(args.music_dir or os.environ.get("MUSIC2DAP_MUSIC_DIR"))
     scan_targets = args.urls or [default_scan_path(args.mount_root, args.device, music_dir)]
 
-    if args.doctor and args.update_metadata:
-        p.error("use either --doctor or --update-metadata, not both")
+    modes = [
+        name for name, enabled in (
+            ("--doctor", args.doctor),
+            ("--update-metadata", args.update_metadata),
+            ("--redownload", args.redownload),
+        ) if enabled
+    ]
+    if len(modes) > 1:
+        p.error("use only one of " + ", ".join(modes))
 
-    if not args.urls and (args.doctor or args.update_metadata) and not Path(scan_targets[0]).exists():
+    if (not args.urls and modes
+            and not Path(scan_targets[0]).exists()):
         device_not_mounted(args.mount_root, args.device, scan_targets[0])
 
     if not args.urls:
@@ -2402,6 +2533,10 @@ def main() -> None:
 
     if args.update_metadata:
         run_update(scan_targets, music_dir)
+        return
+
+    if args.redownload:
+        run_redownload(scan_targets, music_dir, args)
         return
 
     if not shutil.which("ffmpeg"):

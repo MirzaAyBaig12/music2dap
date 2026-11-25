@@ -57,6 +57,24 @@ renamed. `--doctor` groups tracks by artist and album and reports which ones
 are missing a source link, cover, album or artist. Both print a summary; a
 track with no lyrics is reported explicitly under "without lyrics".
 
+## Full rebuild from the stored sources
+
+```sh
+# No path: uses the configured device/Music folder.
+music2dap --redownload
+
+# Or point it at a specific library (only Music/ is scanned).
+music2dap --redownload ~/Music/HiBy
+```
+
+`--redownload` reads every file's `SOURCE` tag (falling back to `COMMENT`),
+copies the whole library into a sibling `music.bak` folder, then re-downloads
+each unique Spotify track at full quality. Files without a Spotify source are
+backed up but left untouched. The existing file stays in place until its
+replacement has been written, so an interrupted run never leaves a half-written
+track. If `music.bak` already contains files the command stops instead of
+overwriting that backup.
+
 ## GUI
 
 The Flutter app lives in `gui/` and builds for Windows and Linux.
